@@ -7,6 +7,8 @@ from PIL import Image
 
 from rlbench.backend.utils import image_to_float_array
 from pyrep.objects import VisionSensor
+from concurrent.futures import ThreadPoolExecutor
+
 
 # constants
 EPISODE_FOLDER = 'episode%d'
@@ -26,20 +28,8 @@ VARIATION_NUMBER_PICKLE = 'variation_number.pkl'
 
 DEPTH_SCALE = 2**24 - 1
 
-# functions
-def get_stored_demo(data_path, index):
-  episode_path = os.path.join(data_path, EPISODE_FOLDER % index)
-  
-  # low dim pickle file
-  with open(os.path.join(episode_path, LOW_DIM_PICKLE), 'rb') as f:
-    obs = pickle.load(f)
 
-  # variation number
-  with open(os.path.join(episode_path, VARIATION_NUMBER_PICKLE), 'rb') as f:
-    obs.variation_number = pickle.load(f)
-
-  num_steps = len(obs)
-  for i in range(num_steps):
+def read_image(obs, episode_path, i):
     obs[i].front_rgb = np.array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_FRONT, IMAGE_RGB), IMAGE_FORMAT % i)))
     obs[i].left_shoulder_rgb = np.array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_LS, IMAGE_RGB), IMAGE_FORMAT % i)))
     obs[i].right_shoulder_rgb = np.array(Image.open(os.path.join(episode_path, '%s_%s' % (CAMERA_RS, IMAGE_RGB), IMAGE_FORMAT % i)))
@@ -72,10 +62,28 @@ def get_stored_demo(data_path, index):
                                                                                             obs[i].misc['left_shoulder_camera_extrinsics'],
                                                                                             obs[i].misc['left_shoulder_camera_intrinsics'])
     obs[i].right_shoulder_point_cloud = VisionSensor.pointcloud_from_depth_and_camera_params(obs[i].right_shoulder_depth, 
-                                                                                             obs[i].misc['right_shoulder_camera_extrinsics'],
-                                                                                             obs[i].misc['right_shoulder_camera_intrinsics'])
+                                                                                            obs[i].misc['right_shoulder_camera_extrinsics'],
+                                                                                            obs[i].misc['right_shoulder_camera_intrinsics'])
     obs[i].wrist_point_cloud = VisionSensor.pointcloud_from_depth_and_camera_params(obs[i].wrist_depth, 
-                                                                                           obs[i].misc['wrist_camera_extrinsics'],
-                                                                                           obs[i].misc['wrist_camera_intrinsics'])
+                                                                                          obs[i].misc['wrist_camera_extrinsics'],
+                                                                                          obs[i].misc['wrist_camera_intrinsics'])
+
+def get_stored_demo(data_path, index, is_read_image=True    ):
+    episode_path = os.path.join(data_path, EPISODE_FOLDER % index)
+  
+    # low dim pickle file
+    with open(os.path.join(episode_path, LOW_DIM_PICKLE), 'rb') as f:
+        obs = pickle.load(f)
+
+    # variation number
+    with open(os.path.join(episode_path, VARIATION_NUMBER_PICKLE), 'rb') as f:
+        obs.variation_number = pickle.load(f)
+
+    num_steps = len(obs)
     
-  return obs
+    if is_read_image:
+        with ThreadPoolExecutor(max_workers=12) as executor:
+        # Submit all tasks for parallel execution
+            for step in range(num_steps):
+                executor.submit(read_image, obs, episode_path, step)
+    return obs
